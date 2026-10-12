@@ -461,6 +461,40 @@ test('L5 Pick Spot never hangs or breaks when only one spot exists', async g => 
   const s = await waitForSupply(g, 80); assert(isSpot(s.x, s.y), 'a supply still appears');
 });
 
+// ------------------------------------------------------------------ Loop 6: sound
+test('L6 every sprite has its sounds; all WAV files decode in a real browser audio engine', async g => {
+  const JSZip = require('jszip'); const zip = await JSZip.loadAsync(fs.readFileSync(SB3));
+  const proj = JSON.parse(await zip.file('project.json').async('string')); const files = {};
+  for (const t of proj.targets) for (const s of t.sounds) files[t.name + ':' + s.name] = (await zip.file(s.md5ext).async('base64'));
+  const r = await g.eval(async f => { const out = {}; const ac = new (window.AudioContext || window.webkitAudioContext)();
+    for (const [k, b64] of Object.entries(f)) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      out[k] = +(await ac.decodeAudioData(u.buffer)).duration.toFixed(2); } return out; }, files);
+  for (const k of ['Rescue Runner:jump', 'Rescue Runner:splash', 'Emergency Supply:collect', 'Rising Water:alarm', 'Game Controller:start', 'Game Controller:win', 'Game Controller:lose', 'Game Controller:music'])
+    assert(r[k] > 0.1, 'sound decodes: ' + k + ' ' + JSON.stringify(r));
+});
+test('L6 sounds play at the right moments (start, music, jump, collect, win) and music stops at the end', async g => {
+  await begin(g); await g.step(40);
+  let snd = (await g.sounds()).map(s => s.sound);
+  assert(snd.includes('start') && snd.includes('music'), 'start jingle + music: ' + snd);
+  await g.tap(' '); await g.step(30); assert((await g.sounds()).some(s => s.sound === 'jump'), 'jump sound');
+  await collectCurrent(g); await g.step(5); assert((await g.sounds()).some(s => s.sound === 'collect'), 'collect sound');
+  const musicPlays = (await g.sounds()).filter(s => s.sound === 'music').length;
+  await g.step(400); assert((await g.sounds()).filter(s => s.sound === 'music').length > musicPlays, 'music loops');
+  await winGame(g).catch(() => {}); await g.step(10);
+  assert(await g.v('Game State') === 'won', 'won'); const n = (await g.sounds()).filter(s => s.sound === 'music').length;
+  assert((await g.sounds()).some(s => s.sound === 'win'), 'win fanfare'); await g.step(600);
+  assert((await g.sounds()).filter(s => s.sound === 'music').length === n, 'music stopped after the win');
+});
+test('L6 lose sound + flood alarm', async g => {
+  await begin(g); await g.setV('Water Level', 61); await g.step(10);
+  assert((await g.sounds()).some(s => s.sound === 'alarm'), 'alarm when the flood gets high');
+  await g.setV('Water Level', 173); await g.step(30); assert((await g.sounds()).some(s => s.sound === 'lose'), 'lose sound');
+});
+test('L6 splash plays once when the runner gets wet', async g => {
+  await begin(g); await g.setV('Water Level', -60); await g.step(20);
+  assert((await g.sounds()).filter(s => s.sound === 'splash').length === 1, 'one splash');
+});
+
 //__MORE_TESTS__
 
 (async () => {

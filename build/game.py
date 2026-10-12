@@ -2,6 +2,7 @@
 from sb3lib import *
 from layout import *
 import art
+import audio
 
 
 # ---- tiny helpers so the scripts below read like Scratch blocks ----
@@ -103,6 +104,8 @@ def costume(name):
 def build():
     P = Project()
     stage = P.stage
+    SND = audio.all_sounds()
+
 
     # ---------------- global variables & broadcasts ----------------
     for name, val in [("Score", 0), ("Water Level", WATER_START), ("Game State", "title"), ("Vertical Speed", 0)]:
@@ -120,8 +123,10 @@ def build():
     for nm, d in art.runner_costumes().items():
         runner.add_costume(nm, d, "svg", art.RW / 2, art.RH)     # rotation centre = feet
     runner.props.update(layerOrder=3, x=RUNNER_START_X, y=GROUND_Y, rotationStyle="left-right")
-    for nm in ["Floor Y", "On Ground", "Moving", "Speed", "Walk Frame"]:
+    for nm in ["Floor Y", "On Ground", "Moving", "Speed", "Walk Frame", "Was Wet"]:
         runner.add_variable(nm, 0)
+    runner.add_sound("jump", SND["jump"])
+    runner.add_sound("splash", SND["splash"])
 
     # on the title screen the runner just stands there
     runner.script(blk("event_whenflagclicked"), [
@@ -200,7 +205,7 @@ def build():
     runner.define("Jump And Gravity", [
         call("Apply Gravity"),
         IF(AND(EQ(var("On Ground"), 1), OR(keyp("space"), keyp("up arrow"))), [
-            setv("Vertical Speed", JUMP_SPEED), setv("On Ground", 0)]),
+            setv("Vertical Speed", JUMP_SPEED), setv("On Ground", 0), play("jump")]),
     ], comment="Gravity, plus: SPACE (or up arrow) while standing on something gives an upward Vertical Speed.")
 
     runner.define("Pick Costume", [
@@ -211,8 +216,9 @@ def build():
                 costume(JOIN("walk ", ADD(1, MOD(MATH("floor", DIV(var("Walk Frame"), 2)), 6))))],
                 [costume("idle"), setv("Walk Frame", 0)])]),
         IFELSE(LT(Y(), var("Water Level")),
-               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=-18)],
-               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=0)]),
+               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=-18),
+                IF(EQ(var("Was Wet"), 0), [play("splash"), setv("Was Wet", 1)])],
+               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=0), setv("Was Wet", 0)]),
     ], comment="Jumping, falling, walking (6 pictures in a loop) or standing still. A runner standing in the water looks darker and wet.")
 
     # ---------------- Sprite 2: Emergency Supply ----------------
@@ -222,6 +228,7 @@ def build():
     supply.props.update(layerOrder=2, visible=False)
     for nm in ["Spot Index", "Last Spot", "Tries", "Spot OK", "Bob", "Base Y"]:
         supply.add_variable(nm, 0)
+    supply.add_sound("collect", SND["collect"])
     supply.add_list("Spot X", [x for x, y in SPOTS])
     supply.add_list("Spot Y", [y for x, y in SPOTS])
 
@@ -298,6 +305,7 @@ def build():
 
     supply.define("Collect Supply", [
         chg("Score", 1),
+        play("collect"),
         broadcast("Supply Collected"),
         costume("burst"),
         blk("control_repeat", TIMES=6, SUBSTACK=[
@@ -312,6 +320,8 @@ def build():
     water = P.sprite("Rising Water")
     for nm, d in art.water_costumes().items():
         water.add_costume(nm, d, "svg", art.WCX, art.WCY)       # rotation centre = the water surface
+    water.add_sound("alarm", SND["alarm"])
+    water.add_variable("Warned", 0)
     water.props.update(layerOrder=1, x=0, y=WATER_START)   # behind the runner and supplies: the player is always visible
 
     water.script(blk("event_whenflagclicked"), [
@@ -326,11 +336,13 @@ def build():
         comment="Wave animation: 6 pictures of the water surface, forever.")
 
     water.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
-        blk("looks_cleargraphiceffects"),
+        blk("looks_cleargraphiceffects"), setv("Warned", 0),
         blk("motion_gotoxy", X=0, Y=var("Water Level")), blk("looks_show"),
         blk("control_repeat_until", CONDITION=OR(NOT(EQ(var("Game State"), "playing")), GT(var("Water Level"), WATER_TOP)), SUBSTACK=[
             chg("Water Level", WATER_RATE),
             blk("motion_gotoxy", X=0, Y=var("Water Level")),
+            IF(AND(GT(var("Water Level"), 60), EQ(var("Warned"), 0)), [play("alarm"), setv("Warned", 1)]),
+            IF(AND(GT(var("Water Level"), 130), EQ(var("Warned"), 1)), [play("alarm"), setv("Warned", 2)]),
             blk("looks_seteffectto", fields={"EFFECT": "brightness"},
                 VALUE=MUL(DIV(SUB(var("Water Level"), WATER_START), WATER_TOP - WATER_START), -25))]),
         IF(EQ(var("Game State"), "playing"), [broadcast("Game Lost")])],
@@ -338,13 +350,12 @@ def build():
 
     # ---------------- Sprite 4: Game Controller ----------------
     ctl = P.sprite("Game Controller")
-    for nm, t, s in [("title", "RESCUE RUNNER", "Collect 10 supplies before the flood!"),
-                     ("win", "YOU DID IT!", "Press SPACE to play again"),
-                     ("lose", "FLOODED!", "Press SPACE to try again")]:
-        d, cx, cy = art.screen(t, s)
-        ctl.add_costume(nm, d, "svg", cx, cy)
+    for nm, d in [("title", art.title_card()), ("win", art.win_card()), ("lose", art.lose_card())]:
+        ctl.add_costume(nm, d, "svg", 240, 180)
     for n in range(SUPPLIES_TO_WIN + 1):
         ctl.add_costume("Score %d" % n, art.hud(n), "svg", 240, 180)
+    for nm in ["start", "win", "lose", "music"]:
+        ctl.add_sound(nm, SND[nm])
     ctl.props.update(layerOrder=4, x=0, y=0)
 
     ctl.script(blk("event_whenflagclicked"), [
@@ -363,8 +374,15 @@ def build():
         comment="Reset everything FIRST (score, water, speed, state), then tell all the sprites to start.")
 
     ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
-        costume("Score 0"), blk("motion_gotoxy", X=0, Y=0), blk("looks_show")],
+        costume("Score 0"), blk("motion_gotoxy", X=0, Y=0), blk("looks_show"), play("start")],
         comment="The scoreboard is a costume: 'Score 0' ... 'Score 10'.")
+
+    ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
+        blk("sound_setvolumeto", VOLUME=45),
+        blk("control_wait", DURATION=0.6),
+        blk("control_repeat_until", CONDITION=NOT(EQ(var("Game State"), "playing")), SUBSTACK=[
+            blk("sound_playuntildone", SOUND_MENU="music")])],
+        comment="Background music loops while the game is being played.")
 
     ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Supply Collected"}), [
         costume(JOIN("Score ", var("Score"))),
@@ -374,6 +392,7 @@ def build():
     ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Won"}), [
         IF(EQ(var("Game State"), "playing"), [
             setv("Game State", "won"),
+            blk("sound_stopallsounds"), blk("sound_setvolumeto", VOLUME=80), play("win"),
             costume("win"),
             call("Wait For Restart")])],
         comment="VICTORY screen. It only happens if the game was still 'playing', so a win and a loss can never both happen.")
@@ -381,6 +400,7 @@ def build():
     ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Lost"}), [
         IF(EQ(var("Game State"), "playing"), [
             setv("Game State", "lost"),
+            blk("sound_stopallsounds"), blk("sound_setvolumeto", VOLUME=80), play("lose"),
             costume("lose"),
             call("Wait For Restart")])],
         comment="DEFEAT screen: the flood reached the top.")
