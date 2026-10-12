@@ -43,3 +43,7 @@ SPOTS = [
     (-185, 95 + HOVER),
     (145,  95 + HOVER),
 ]
+
+FEET_REACH = 8           # how far the feet may overhang a platform edge and still stand on it
+SCREEN_EDGE = 225        # the runner cannot walk past this x
+RUNNER_START_X = -10      # open street (nothing low overhead), centre of the screen
