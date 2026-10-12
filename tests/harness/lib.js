@@ -26,6 +26,7 @@ async function openGame(sb3Path) {
     list: (s, n) => page.evaluate(([s, n]) => H.list(s, n), [s, n]),
     sprite: n => page.evaluate(n => H.sprite(n), n),
     touching: (a, b) => page.evaluate(([a, b]) => H.touching(a, b), [a, b]),
+    broadcasts: () => page.evaluate(() => H.broadcastLog.slice()),
     sounds: () => page.evaluate(() => H.soundLog.slice()),
     threads: () => page.evaluate(() => H.threads()),
     eval: (fn, arg) => page.evaluate(fn, arg),

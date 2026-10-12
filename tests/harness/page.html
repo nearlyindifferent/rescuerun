@@ -17,7 +17,8 @@
 })();
 
 const FRAME_MS = 1000 / 30;
-const soundLog = [];            // {t, sprite, sound}
+const soundLog = [];
+const broadcastLog = [];       // {frame, name} every time a broadcast is sent            // {t, sprite, sound}
 const pendingSounds = [];       // sounds "playing" (resolve when virtual time passes)
 let vm, renderer;
 let frame = 0;
@@ -52,7 +53,7 @@ function fakeAudioEngine() {
 }
 
 window.H = {
-  soundLog,
+  soundLog, broadcastLog,
   async load(b64) {
     const bin = atob(b64); const buf = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
@@ -67,6 +68,11 @@ window.H = {
     await vm.loadProject(buf.buffer);
     vm.runtime.compatibilityMode = true;           // Scratch's normal 30 fps mode
     vm.runtime.currentStepTime = 1000 / 30;
+    const origStart = vm.runtime.startHats.bind(vm.runtime);
+    vm.runtime.startHats = (op, fields, target) => {
+      if (op === 'event_whenbroadcastreceived' && fields) broadcastLog.push({ frame, name: fields.BROADCAST_OPTION });
+      return origStart(op, fields, target);
+    };
     window.vm = vm;
     return vm.runtime.targets.map(t => t.getName());
   },

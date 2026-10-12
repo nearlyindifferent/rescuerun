@@ -136,6 +136,7 @@ def build():
         blk("motion_gotoxy", X=RUNNER_START_X, Y=GROUND_Y),
         blk("motion_pointindirection", DIRECTION=90),
         setv("Vertical Speed", 0), setv("On Ground", 1), setv("Walk Frame", 0),
+        blk("looks_cleargraphiceffects"),
         costume("idle"), blk("looks_show"),
         blk("control_wait_until", CONDITION=NOT(keyp("space"))),        # the SPACE that started the game must not also jump
         blk("control_repeat_until", CONDITION=NOT(EQ(var("Game State"), "playing")), SUBSTACK=[
@@ -191,7 +192,10 @@ def build():
                 chg("Walk Frame", 1),
                 costume(JOIN("walk ", ADD(1, MOD(MATH("floor", DIV(var("Walk Frame"), 2)), 6))))],
                 [costume("idle"), setv("Walk Frame", 0)])]),
-    ], comment="Jumping, falling, walking (6 pictures in a loop) or standing still.")
+        IFELSE(LT(Y(), var("Water Level")),
+               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=-18)],
+               [blk("looks_seteffectto", fields={"EFFECT": "brightness"}, VALUE=0)]),
+    ], comment="Jumping, falling, walking (6 pictures in a loop) or standing still. A runner standing in the water looks darker and wet.")
 
     # ---------------- Sprite 2: Emergency Supply ----------------
     supply = P.sprite("Emergency Supply")
@@ -281,11 +285,31 @@ def build():
 
     # ---------------- Sprite 3: Rising Water ----------------
     water = P.sprite("Rising Water")
-    d, cx, cy = art.water()
-    water.add_costume("wave 1", d, "svg", cx, cy)
-    water.props.update(layerOrder=4, x=0, y=WATER_START)
+    for nm, d in art.water_costumes().items():
+        water.add_costume(nm, d, "svg", art.WCX, art.WCY)       # rotation centre = the water surface
+    water.props.update(layerOrder=1, x=0, y=WATER_START)   # behind the runner and supplies: the player is always visible
+
     water.script(blk("event_whenflagclicked"), [
-        blk("motion_gotoxy", X=0, Y=var("Water Level")), blk("looks_show")])
+        setv("Water Level", WATER_START),
+        blk("looks_cleargraphiceffects"),
+        blk("motion_gotoxy", X=0, Y=var("Water Level")), costume("wave 1"), blk("looks_show")],
+        comment="On the title screen the water sits at the bottom of the screen.")
+
+    water.script(blk("event_whenflagclicked"), [
+        blk("control_forever", SUBSTACK=[
+            blk("looks_nextcostume"), blk("control_wait", DURATION=0.12)])],
+        comment="Wave animation: 6 pictures of the water surface, forever.")
+
+    water.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
+        blk("looks_cleargraphiceffects"),
+        blk("motion_gotoxy", X=0, Y=var("Water Level")), blk("looks_show"),
+        blk("control_repeat_until", CONDITION=OR(NOT(EQ(var("Game State"), "playing")), GT(var("Water Level"), WATER_TOP)), SUBSTACK=[
+            chg("Water Level", WATER_RATE),
+            blk("motion_gotoxy", X=0, Y=var("Water Level")),
+            blk("looks_seteffectto", fields={"EFFECT": "brightness"},
+                VALUE=MUL(DIV(SUB(var("Water Level"), WATER_START), WATER_TOP - WATER_START), -25))]),
+        IF(EQ(var("Game State"), "playing"), [broadcast("Game Lost")])],
+        comment="THE FLOOD: every frame the water rises a little and gets darker. If it reaches the top of the screen while we are still playing, the game is lost.")
 
     # ---------------- Sprite 4: Game Controller ----------------
     ctl = P.sprite("Game Controller")
@@ -296,7 +320,7 @@ def build():
         ctl.add_costume(nm, d, "svg", cx, cy)
     for n in range(SUPPLIES_TO_WIN + 1):
         ctl.add_costume("Score %d" % n, art.hud(n), "svg", 240, 180)
-    ctl.props.update(layerOrder=5, x=0, y=0)
+    ctl.props.update(layerOrder=4, x=0, y=0)
 
     ctl.script(blk("event_whenflagclicked"), [
         setv("Game State", "title"), setv("Score", 0),

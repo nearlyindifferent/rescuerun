@@ -183,8 +183,46 @@ def hud(n):
     return svg_doc(480, 360, inner)
 
 
-def water():
-    return svg_doc(500, 400, '<rect y="14" width="500" height="386" fill="#1c8ef0" fill-opacity="0.75"/>'), 250, 14
+# ---------------------------------------------------------------------------
+# Floodwater: 6 wave frames.  Rotation centre (WCX, WCY) is the water surface,
+# so "go to x: 0 y: Water Level" puts the surface exactly at Water Level.
+# ---------------------------------------------------------------------------
+WW, WH, WCX, WCY = 520, 420, 260, 16
+WAVE_FRAMES = 6
+
+
+def _wave_path(phase, amp, wavelength, y0, close_to=WH):
+    pts = []
+    x = 0
+    while x <= WW + 1:
+        y = y0 + amp * math.sin(2 * math.pi * x / wavelength + phase)
+        pts.append("%.1f %.1f" % (x, y))
+        x += 4
+    return "M" + " L".join(pts), pts
+
+
+def water_costumes():
+    out = {}
+    for k in range(WAVE_FRAMES):
+        ph = 2 * math.pi * k / WAVE_FRAMES
+        back, _ = _wave_path(ph + 1.9, 6.5, 78, WCY - 4)
+        front, pts = _wave_path(-ph, 5, 52, WCY)
+        parts = ['<defs><linearGradient id="wb" x1="0" y1="0" x2="0" y2="1">'
+                 '<stop offset="0" stop-color="#58c4ff" stop-opacity="0.72"/>'
+                 '<stop offset="0.35" stop-color="#2a9bf5" stop-opacity="0.78"/>'
+                 '<stop offset="1" stop-color="#0b4fb8" stop-opacity="0.88"/></linearGradient></defs>']
+        parts.append('<path d="%s L%d %d L0 %d Z" fill="#9fe0ff" fill-opacity="0.55"/>' % (back, WW, WH, WH))
+        parts.append('<path d="%s L%d %d L0 %d Z" fill="url(#wb)"/>' % (front, WW, WH, WH))
+        parts.append('<path d="%s" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="2.6" stroke-linejoin="round"/>' % front)
+        # light streaks and bubbles that slide with the wave so the surface seems to flow
+        for j in range(7):
+            sx = (j * 83 + k * 14) % WW
+            parts.append('<rect x="%d" y="%d" width="%d" height="2.4" rx="1.2" fill="#fff" fill-opacity="0.32"/>' % (sx, WCY + 22 + (j % 3) * 15, 26 + (j % 2) * 14))
+        for j in range(5):
+            bx = (j * 107 + 30 + k * 9) % WW
+            parts.append('<circle cx="%d" cy="%d" r="%s" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="1.4"/>' % (bx, WCY + 58 + (j * 23) % 70, 2.5 + j % 3))
+        out["wave %d" % (k + 1)] = svg_doc(WW, WH, "".join(parts))
+    return out
 
 
 def screen(title, sub):

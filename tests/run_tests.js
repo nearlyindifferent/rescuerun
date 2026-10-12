@@ -249,6 +249,59 @@ test('L3 supply positions are spread across the whole map over many spawns', asy
   assert(used.size >= 8, 'variety: only ' + used.size + ' of 9 spots used');
 });
 
+// ------------------------------------------------------------------ Loop 4
+test('L4 title screen: water waits at the bottom and does not rise yet', async g => {
+  await g.flag(); await g.step(90);
+  const w = await g.sprite('Rising Water'); near(w.y, LAYOUT.WATER_START, 0.001, 'water y'); assert(w.visible, 'water visible');
+  near(Number(await g.v('Water Level')), LAYOUT.WATER_START, 0.001, 'Water Level');
+});
+test('L4 water rises smoothly: constant 0.14 px per frame, sprite follows Water Level', async g => {
+  await begin(g); await g.step(2);
+  let prev = Number(await g.v('Water Level')); const deltas = [];
+  for (let i = 0; i < 90; i++) {
+    await g.step(1); const lvl = Number(await g.v('Water Level')); deltas.push(lvl - prev); prev = lvl;
+    const w = await g.sprite('Rising Water'); if (i % 15 === 0) near(w.y, lvl, 0.01, 'sprite y follows level');
+  }
+  const mn = Math.min(...deltas), mx = Math.max(...deltas);
+  near(mn, LAYOUT.WATER_RATE, 1e-6, 'min step'); near(mx, LAYOUT.WATER_RATE, 1e-6, 'max step (no jitter)');
+});
+test('L4 wave animation cycles through all 6 costumes', async g => {
+  await begin(g); const seen = new Set();
+  for (let i = 0; i < 40; i++) { await g.step(1); seen.add((await g.sprite('Rising Water')).costume); }
+  assert(seen.size === 6, 'wave costumes seen: ' + [...seen]);
+});
+test('L4 water gets darker as it rises (danger cue)', async g => {
+  await begin(g); await g.step(3); const b0 = (await g.sprite('Rising Water')).brightness;
+  await g.setV('Water Level', 0); await g.step(3); const b1 = (await g.sprite('Rising Water')).brightness;
+  await g.setV('Water Level', 150); await g.step(3); const b2 = (await g.sprite('Rising Water')).brightness;
+  assert(b0 > b1 && b1 > b2, `brightness ${b0} > ${b1} > ${b2}`); assert(b2 < -20 && b2 >= -25.5, 'near -25 at the top: ' + b2);
+});
+test('L4 flood timeline: ~80 s to reach the top, then exactly one Game Lost and the water stops', async g => {
+  await begin(g);
+  const startFrame = (await g.broadcasts()).filter(b => b.name === 'Start Game').pop().frame;
+  let lostFrame = null;
+  for (let i = 0; i < 2600 && lostFrame === null; i += 10) {
+    await g.step(10);
+    const lost = (await g.broadcasts()).filter(b => b.name === 'Game Lost'); if (lost.length) lostFrame = lost[0].frame;
+  }
+  assert(lostFrame !== null, 'water never reached the top');
+  const secs = (lostFrame - startFrame) / 30; assert(secs > 70 && secs < 95, 'time to flood: ' + secs.toFixed(1) + ' s');
+  await g.step(120);
+  assert((await g.broadcasts()).filter(b => b.name === 'Game Lost').length === 1, 'Game Lost sent exactly once');
+  const lvl = Number(await g.v('Water Level')); assert(lvl > LAYOUT.WATER_TOP && lvl < LAYOUT.WATER_TOP + 1, 'water stopped at the top: ' + lvl);
+});
+test('L4 supplies are never placed under water while drier spots exist', async g => {
+  await begin(g); await g.setV('Water Level', -30);
+  for (let n = 0; n < 30; n++) {
+    await collectCurrent(g); await g.setV('Score', 0); await g.setV('Water Level', -30); await g.step(14);
+    const s = await waitForSupply(g); assert(s.y > -30 + 3, `supply at y=${s.y} is under water level -30`);
+  }
+});
+test('L4 water reaching the top sends Game Lost within a moment', async g => {
+  await begin(g); await g.setV('Water Level', 171); await g.step(30);
+  assert((await g.broadcasts()).some(b => b.name === 'Game Lost'), 'Game Lost sent');
+});
+
 //__MORE_TESTS__
 
 (async () => {
