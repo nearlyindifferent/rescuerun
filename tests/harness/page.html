@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Scratch runtime harness</title></head>
+<body style="margin:0;background:#222">
+<canvas id="stage" width="480" height="360" style="width:480px;height:360px"></canvas>
+<script src="../node_modules/scratch-vm/dist/web/scratch-vm.js"></script>
+<script src="../node_modules/scratch-render/dist/web/scratch-render.js"></script>
+<script src="../node_modules/scratch-svg-renderer/dist/web/scratch-svg-renderer.js"></script>
+<script src="../node_modules/scratch-storage/dist/web/scratch-storage.js"></script>
+<script>
+// ---- virtual 30 fps clock so every test run is deterministic -----------------
+(function () {
+  let vt = 1000000;
+  // every clock read ticks 0.05 ms: deterministic, but Scratch's per-frame work budget can still expire
+  Date.now = () => (vt += 0.05);
+  performance.now = () => (vt += 0.05) - 1000000;
+  window.__advance = ms => { vt += ms; };
+})();
+
+const FRAME_MS = 1000 / 30;
+const soundLog = [];            // {t, sprite, sound}
+const pendingSounds = [];       // sounds "playing" (resolve when virtual time passes)
+let vm, renderer;
+let frame = 0;
+
+function fakeAudioEngine() {
+  return {
+    createBank() {
+      return {
+        soundPlayers: {},
+        addSoundPlayer(p) { this.soundPlayers[p.id] = p; },
+        getSoundPlayer(id) { return this.soundPlayers[id]; },
+        getSoundEffects() { return {}; },
+        playSound(target, id) {
+          const p = this.soundPlayers[id];
+          soundLog.push({ frame, sprite: target.sprite.name, sound: p.name });
+          return new Promise(res => pendingSounds.push({ end: Date.now() + p.seconds * 1000, res, id, target }));
+        },
+        stop(target, id) { for (const s of pendingSounds) if (s.id === id && s.target === target) s.end = 0; },
+        stopAllSounds(target) { for (const s of pendingSounds) if (!target || s.target === target) s.end = 0; },
+        setEffects() {},
+      };
+    },
+    decodeSoundPlayer({ data, name }) {
+      const bytes = data;                       // Uint8Array of the WAV
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const rate = dv.getUint32(24, true);
+      const frames = (bytes.byteLength - 44) / 2;
+      return Promise.resolve({ id: 'snd' + Math.random().toString(36).slice(2), name,
+                               seconds: frames / rate, buffer: { length: frames, sampleRate: rate } });
+    },
+  };
+}
+
+window.H = {
+  soundLog,
+  async load(b64) {
+    const bin = atob(b64); const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    const VM = VirtualMachine.default || VirtualMachine; vm = new VM();
+    const SS = ScratchStorage.ScratchStorage; const storage = new SS();
+    vm.attachStorage(storage);
+    const SR = ScratchRender.default || ScratchRender; renderer = new SR(document.getElementById('stage'));
+    vm.attachRenderer(renderer);
+    vm.attachV2SVGAdapter(new ScratchSVGRenderer.SVGRenderer());
+    vm.attachV2BitmapAdapter(new ScratchSVGRenderer.BitmapAdapter());
+    vm.runtime.attachAudioEngine(fakeAudioEngine());
+    await vm.loadProject(buf.buffer);
+    vm.runtime.compatibilityMode = true;           // Scratch's normal 30 fps mode
+    vm.runtime.currentStepTime = 1000 / 30;
+    window.vm = vm;
+    return vm.runtime.targets.map(t => t.getName());
+  },
+  greenFlag() { vm.greenFlag(); },
+  async step(n = 1) {
+    for (let i = 0; i < n; i++) {
+      window.__advance(FRAME_MS);
+      frame++;
+      for (const s of pendingSounds.slice()) if (s.end <= Date.now()) { pendingSounds.splice(pendingSounds.indexOf(s), 1); s.res(); }
+      await Promise.resolve(); await Promise.resolve();
+      vm.runtime._step();
+    }
+    return frame;
+  },
+  key(k, down) { vm.postIOData('keyboard', { key: k, isDown: down }); },
+  variable(name) {
+    for (const t of vm.runtime.targets) for (const id in t.variables) if (t.variables[id].name === name) return t.variables[id].value;
+    return undefined;
+  },
+  setVariable(name, value) {
+    for (const t of vm.runtime.targets) for (const id in t.variables) if (t.variables[id].name === name) t.variables[id].value = value;
+  },
+  list(spriteName, name) {
+    const t = vm.runtime.targets.find(t => t.getName() === spriteName);
+    for (const id in t.variables) if (t.variables[id].name === name) return t.variables[id].value;
+  },
+  sprite(name) {
+    const t = vm.runtime.targets.find(t => t.getName() === name);
+    const c = t.getCostumes()[t.currentCostume];
+    return { x: +t.x.toFixed(2), y: +t.y.toFixed(2), visible: t.visible, costume: c.name, size: +t.size.toFixed(1),
+             ghost: t.effects.ghost, brightness: t.effects.brightness, direction: t.direction,
+             layer: t.getLayerOrder ? t.getLayerOrder() : null };
+  },
+  touching(a, b) {
+    const ta = vm.runtime.targets.find(t => t.getName() === a);
+    const tb = vm.runtime.targets.find(t => t.getName() === b);
+    return ta.isTouchingSprite(b);
+  },
+  threads() { return vm.runtime.threads.length; },
+  snapshot() {
+    return new Promise(res => { renderer.requestSnapshot(res); renderer.draw(); });
+  },
+};
+</script></body></html>

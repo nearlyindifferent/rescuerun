@@ -1,0 +1,16 @@
+{
+  "name": "rescue-runner-tests",
+  "private": true,
+  "description": "Headless Scratch 3 runtime harness used to verify Rescue_Runner.sb3",
+  "dependencies": {
+    "scratch-audio": "2.0.270",
+    "scratch-render": "2.2.84",
+    "scratch-storage": "6.2.1",
+    "scratch-svg-renderer": "3.1.19",
+    "scratch-vm": "5.0.300"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1",
+    "scratch-parser": "^6.0.1"
+  }
+}
