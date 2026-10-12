@@ -4,7 +4,10 @@ const { openGame } = require('./harness/lib');
 const SB3 = path.resolve(process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : path.join(__dirname, '..', 'Rescue_Runner.sb3'));
 const FILTER = process.argv[3] || '';
 
-const GROUND = -115;
+const fs = require('fs');
+const LAYOUT = JSON.parse(fs.readFileSync(path.join(__dirname, 'out', 'layout.json')));
+const GROUND = LAYOUT.GROUND_Y;
+const SPOTS = LAYOUT.SPOTS;
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 const assert = (cond, msg) => { if (!cond) throw new Error('ASSERT: ' + msg); };
@@ -15,6 +18,20 @@ async function begin(g) {            // green flag, then press SPACE on the titl
   await g.tap(' '); await g.step(4);
 }
 
+async function teleport(g, x, y) {
+  await g.eval(([x, y]) => vm.runtime.targets.find(t => t.getName() === 'Rescue Runner').setXY(x, y), [x, y]);
+}
+async function waitForSupply(g, maxFrames = 60) {          // step until the supply is visible and finished popping in
+  for (let i = 0; i < maxFrames; i++) { const s = await g.sprite('Emergency Supply'); if (s.visible && s.ghost === 0 && s.costume.startsWith('supply')) return s; await g.step(1); }
+  throw new Error('supply never appeared');
+}
+async function collectCurrent(g) {                          // stand on the supply and wait for the score to change
+  const s = await waitForSupply(g); const before = await g.v('Score');
+  await teleport(g, s.x, s.y - LAYOUT.HOVER);
+  for (let i = 0; i < 6; i++) { await g.step(1); if ((await g.v('Score')) !== before) break; }
+  return s;
+}
+const isSpot = (x, y) => SPOTS.some(([sx, sy]) => Math.abs(sx - x) < 0.5 && Math.abs(sy - y) < 5);
 async function walkTo(g, x, tol = 3) {        // hold an arrow key until the runner is within tol of x
   for (let i = 0; i < 400; i++) {
     const r = await g.sprite('Rescue Runner'); const d = x - r.x;
@@ -173,6 +190,65 @@ test('L2 when Game State is not "playing" the runner stops responding', async g 
 });
 
 // ---- tests added by later loops live below (appended by each loop) ----
+// ------------------------------------------------------------------ Loop 3
+test('L3 spots: every supply spot sits on the street or on a platform the runner can stand on', async g => {
+  const surfaces = [{ l: -240, r: 240, top: GROUND }, ...LAYOUT.PLATFORMS.map(p => ({ l: p[1], r: p[2], top: p[3] }))];
+  for (const [x, y] of SPOTS) {
+    const ok = surfaces.some(s => x >= s.l + 10 && x <= s.r - 10 && Math.abs(y - (s.top + LAYOUT.HOVER)) < 0.01);
+    assert(ok, `spot (${x},${y}) is not above a surface`);
+  }
+  const lx = await g.list('Emergency Supply', 'Spot X'); const ly = await g.list('Emergency Supply', 'Spot Y');
+  assert(lx.length === SPOTS.length && ly.length === SPOTS.length, 'lists have all spots');
+});
+test('L3 after start: score 0, scoreboard shows 0, one supply appears at a valid spot behind the runner', async g => {
+  await begin(g); const s = await waitForSupply(g);
+  assert(Number(await g.v('Score')) === 0, 'score 0'); assert(isSpot(s.x, s.y), `valid spot ${s.x},${s.y}`);
+  assert((await g.sprite('Game Controller')).costume === 'Score 0', 'HUD Score 0');
+  assert((await g.sprite('Emergency Supply')).layer < (await g.sprite('Rescue Runner')).layer, 'supply drawn behind the runner');
+});
+test('L3 supply floats (y changes) and its glow costumes cycle', async g => {
+  await begin(g); await waitForSupply(g);
+  const ys = new Set(), cs = new Set();
+  for (let i = 0; i < 30; i++) { await g.step(1); const s = await g.sprite('Emergency Supply'); ys.add(s.y); cs.add(s.costume); }
+  assert(ys.size > 8, 'bobbing: ' + ys.size + ' distinct y'); assert(cs.size === 4, 'glow frames: ' + [...cs]);
+});
+test('L3 touching the supply: score +1 exactly once, HUD updates, starburst, supply moves elsewhere', async g => {
+  await begin(g); const s0 = await collectCurrent(g);
+  assert(await g.v('Score') === 1, 'score 1');
+  assert((await g.sprite('Game Controller')).costume === 'Score 1', 'HUD Score 1');
+  const seen = new Set();
+  for (let i = 0; i < 10; i++) { await g.step(1); seen.add((await g.sprite('Emergency Supply')).costume); }
+  assert(seen.has('burst'), 'burst animation: ' + [...seen]);
+  const s1 = await waitForSupply(g);
+  assert(!(Math.abs(s1.x - s0.x) < 1 && Math.abs(s1.y - s0.y) < 8), 'new supply at a different spot');
+  await g.step(60); assert(await g.v('Score') === 1, 'still 1 after waiting around (no double counting)');
+});
+test('L3 collecting 10 supplies: score counts 1..10 and then stops at 10', async g => {
+  await begin(g);
+  for (let n = 1; n <= 10; n++) {
+    await collectCurrent(g); assert(await g.v('Score') === n, `score ${n}, got ${await g.v('Score')}`);
+    await g.step(12);
+  }
+  assert((await g.sprite('Game Controller')).costume === 'Score 10' || (await g.sprite('Game Controller')).costume === 'win', 'HUD shows 10');
+  await g.step(150); assert(await g.v('Score') === 10, 'score stays 10');
+});
+test('L3 spawns: 60 respawns always use valid spots, never repeat, never appear on top of the runner', async g => {
+  await begin(g); let last = null;
+  for (let n = 0; n < 60; n++) {
+    const s = await collectCurrent(g); await g.setV('Score', 0); await g.step(14);
+    const nx = await waitForSupply(g);
+    assert(isSpot(nx.x, nx.y), `valid spot ${nx.x},${nx.y}`);
+    assert(!(Math.abs(nx.x - s.x) < 1 && Math.abs(nx.y - s.y) < 8), 'no immediate repeat');
+    const r = await g.sprite('Rescue Runner');
+    assert(!(Math.abs(nx.x - r.x) < 70 && Math.abs(nx.y - (r.y + LAYOUT.HOVER)) < 50), `not on top of the runner (${nx.x},${nx.y}) vs (${r.x},${r.y})`);
+  }
+});
+test('L3 supply positions are spread across the whole map over many spawns', async g => {
+  await begin(g); const used = new Set();
+  for (let n = 0; n < 60; n++) { const s = await collectCurrent(g); used.add(s.x + ',' + s.y); await g.setV('Score', 0); await g.step(14); }
+  assert(used.size >= 8, 'variety: only ' + used.size + ' of 9 spots used');
+});
+
 //__MORE_TESTS__
 
 (async () => {

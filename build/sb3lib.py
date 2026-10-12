@@ -71,6 +71,7 @@ SPEC = {
     "sensing_touchingobject": {"TOUCHINGOBJECTMENU": ("menu", "sensing_touchingobjectmenu", "TOUCHINGOBJECTMENU")},
     "sensing_keypressed": {"KEY_OPTION": ("menu", "sensing_keyoptions", "KEY_OPTION")},
     "sensing_timer": {}, "sensing_resettimer": {},
+    "sensing_of": {"OBJECT": ("menu", "sensing_of_object_menu", "OBJECT")},
     "sensing_distanceto": {"DISTANCETOMENU": ("menu", "sensing_distancetomenu", "DISTANCETOMENU")},
     # operators
     "operator_add": {"NUM1": "num", "NUM2": "num"},
@@ -104,7 +105,7 @@ SPEC = {
 REPORTER_OPCODES = {
     "motion_xposition", "motion_yposition", "motion_direction", "looks_size",
     "looks_costumenumbername", "sensing_timer", "data_itemoflist",
-    "data_lengthoflist", "sensing_distanceto",
+    "data_lengthoflist", "sensing_distanceto", "sensing_of",
 }
 
 

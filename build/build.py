@@ -10,6 +10,12 @@ out = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else
 proj = game.build()
 data = proj.save(out)
 nblocks = sum(len(t["blocks"]) for t in data["targets"])
+# the tests read the same layout constants that drew the art and wrote the scripts
+import json
+import layout
+os.makedirs(os.path.join(os.path.dirname(__file__), "..", "tests", "out"), exist_ok=True)
+json.dump({k: getattr(layout, k) for k in dir(layout) if k.isupper()},
+          open(os.path.join(os.path.dirname(__file__), "..", "tests", "out", "layout.json"), "w"), indent=1)
 print("wrote %s  (%d targets, %d blocks)" % (os.path.normpath(out), len(data["targets"]), nblocks))
 
 # optional: dump every costume as a file so the art can be reviewed visually

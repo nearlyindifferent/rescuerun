@@ -118,9 +118,69 @@ def runner_costumes():
     return frames
 
 
-def supply():
-    inner = '<rect x="4" y="4" width="32" height="32" rx="4" fill="#e63946"/><rect x="17" y="9" width="6" height="22" fill="#fff"/><rect x="9" y="17" width="22" height="6" fill="#fff"/>'
-    return svg_doc(40, 40, inner), 20, 20
+# ---------------------------------------------------------------------------
+# Emergency supply crate
+# ---------------------------------------------------------------------------
+def crate(x, y, scale=1.0):
+    """The red first-aid supply crate, drawn in a 40 x 36 box at (x, y)."""
+    return (
+        '<g transform="translate(%.2f %.2f) scale(%.3f)">'
+        '<defs><linearGradient id="cr" x1="0" y1="0" x2="0" y2="1">'
+        '<stop offset="0" stop-color="#ff5d6c"/><stop offset="1" stop-color="#c42a38"/></linearGradient></defs>'
+        '<rect x="12.5" y="1.5" width="15" height="9" rx="4.5" fill="none" stroke="#5b3a1e" stroke-width="3"/>'
+        '<rect x="2" y="8" width="36" height="27" rx="5.5" fill="url(#cr)" stroke="#8f1f2a" stroke-width="1.6"/>'
+        '<rect x="5" y="8.8" width="4.2" height="25.4" fill="#ffd23f"/><rect x="30.8" y="8.8" width="4.2" height="25.4" fill="#ffd23f"/>'
+        '<rect x="3.2" y="9.2" width="14" height="4" rx="2" fill="#fff" fill-opacity="0.35"/>'
+        '<circle cx="20" cy="21.5" r="9.2" fill="#fff"/>'
+        '<rect x="17.6" y="15.2" width="4.8" height="12.6" rx="1" fill="#e63946"/>'
+        '<rect x="13.7" y="19.1" width="12.6" height="4.8" rx="1" fill="#e63946"/>'
+        '<circle cx="7.1" cy="30.5" r="1.1" fill="#8f1f2a"/><circle cx="32.9" cy="30.5" r="1.1" fill="#8f1f2a"/>'
+        '</g>' % (x, y, scale))
+
+
+SW = 56   # supply costume canvas (square); rotation centre = middle
+
+
+def supply_costumes():
+    out = {}
+    for i, (glow, sc) in enumerate([(0.30, 1.0), (0.50, 1.04), (0.65, 1.08), (0.50, 1.04)]):
+        k = SW / 2
+        w, h = 40 * 1.0 * sc, 36 * sc
+        out["supply %d" % (i + 1)] = svg_doc(SW, SW,
+            '<defs><radialGradient id="gl"><stop offset="0.45" stop-color="#fff6a8" stop-opacity="%.2f"/>'
+            '<stop offset="1" stop-color="#fff6a8" stop-opacity="0"/></radialGradient></defs>'
+            '<circle cx="%s" cy="%s" r="27" fill="url(#gl)"/>%s' % (glow, k, k, crate(k - w / 2, k - h / 2 + 1, sc)))
+    pts = []
+    for j in range(16):
+        r = 26 if j % 2 == 0 else 11
+        ang = math.pi * j / 8 - math.pi / 2
+        pts.append("%.1f,%.1f" % (28 + r * math.cos(ang), 28 + r * math.sin(ang)))
+    inner = []
+    for j in range(16):
+        r = 15 if j % 2 == 0 else 6
+        ang = math.pi * j / 8 - math.pi / 2
+        inner.append("%.1f,%.1f" % (28 + r * math.cos(ang), 28 + r * math.sin(ang)))
+    out["burst"] = svg_doc(SW, SW,
+        '<polygon points="%s" fill="#ffd23f" stroke="#ff9f1c" stroke-width="2" stroke-linejoin="round"/>'
+        '<polygon points="%s" fill="#fff" fill-opacity="0.9"/>' % (" ".join(pts), " ".join(inner)))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Heads-up display (one costume per score, drawn on a transparent full-stage canvas)
+# ---------------------------------------------------------------------------
+def hud(n):
+    """Scoreboard pill, top-centre (no supply spot or platform is hidden behind it)."""
+    ox = 135
+    pips = "".join('<rect x="%d" y="45" width="11" height="6" rx="3" fill="%s" fill-opacity="%s"/>'
+                   % (ox + 52 + i * 14, "#ffd23f" if i < n else "#ffffff", 1 if i < n else 0.28) for i in range(SUPPLIES_TO_WIN))
+    inner = (
+        '<rect x="%d" y="7" width="210" height="52" rx="15" fill="#0f2f57" fill-opacity="0.88" stroke="#ffffff" stroke-opacity="0.9" stroke-width="2"/>' % ox
+        + crate(ox + 8, 15, 1.0) +
+        '<text x="%d" y="32" font-family="Sans Serif" font-size="12" font-weight="bold" fill="#9fd8ff">SUPPLIES</text>' % (ox + 54)
+        + '<text x="%d" y="36" font-family="Marker" font-size="25" fill="%s" text-anchor="end">%d/%d</text>' % (ox + 202, "#ffd23f" if n < SUPPLIES_TO_WIN else "#7dff9a", n, SUPPLIES_TO_WIN)
+        + pips)
+    return svg_doc(480, 360, inner)
 
 
 def water():

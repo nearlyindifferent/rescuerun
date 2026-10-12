@@ -195,10 +195,89 @@ def build():
 
     # ---------------- Sprite 2: Emergency Supply ----------------
     supply = P.sprite("Emergency Supply")
-    d, cx, cy = art.supply()
-    supply.add_costume("supply 1", d, "svg", cx, cy)
+    for nm, d in art.supply_costumes().items():
+        supply.add_costume(nm, d, "svg", art.SW / 2, art.SW / 2)
     supply.props.update(layerOrder=2, visible=False)
-    supply.script(blk("event_whenflagclicked"), [blk("looks_hide")])
+    for nm in ["Spot Index", "Last Spot", "Tries", "Spot OK", "Bob", "Base Y"]:
+        supply.add_variable(nm, 0)
+    supply.add_list("Spot X", [x for x, y in SPOTS])
+    supply.add_list("Spot Y", [y for x, y in SPOTS])
+
+    def item_of(lst, idx):
+        return blk("data_itemoflist", fields={"LIST": lst}, INDEX=idx)
+
+    supply.script(blk("event_whenflagclicked"), [
+        blk("looks_hide"), call("Setup Spots")],
+        comment="The supply stays hidden until the game starts.")
+
+    supply.define("Setup Spots",
+        [blk("data_deletealloflist", fields={"LIST": "Spot X"}),
+         blk("data_deletealloflist", fields={"LIST": "Spot Y"})] +
+        [blk("data_addtolist", fields={"LIST": "Spot X"}, ITEM=x) for x, y in SPOTS] +
+        [blk("data_addtolist", fields={"LIST": "Spot Y"}, ITEM=y) for x, y in SPOTS],
+        comment="Two lists hold every place a supply may appear (x and y). Each spot is on the street or on a balcony/roof the runner can reach.")
+
+    supply.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
+        blk("looks_hide"), setv("Last Spot", 0), setv("Bob", 0),
+        blk("control_wait", DURATION=0.5),
+        blk("control_repeat_until", CONDITION=OR(NOT(EQ(var("Game State"), "playing")), EQ(var("Score"), SUPPLIES_TO_WIN)), SUBSTACK=[
+            call("Pick Spot"),
+            call("Pop In"),
+            blk("control_repeat_until", CONDITION=OR(blk("sensing_touchingobject", TOUCHINGOBJECTMENU="Rescue Runner"),
+                                                     NOT(EQ(var("Game State"), "playing"))), SUBSTACK=[
+                call("Float")]),
+            IF(EQ(var("Game State"), "playing"), [call("Collect Supply")]),
+        ]),
+        blk("looks_hide")],
+        comment="Show one supply at a time. Wait until the runner touches it, collect it, then show the next one.")
+
+    supply.define("Check Spot", [
+        setv("Spot OK", 1),
+        IF(EQ(var("Spot Index"), var("Last Spot")), [setv("Spot OK", 0)]),
+        IF(LT(item_of("Spot Y", var("Spot Index")), ADD(var("Water Level"), 5)), [setv("Spot OK", 0)]),
+        IF(AND(
+            LT(MATH("abs", SUB(item_of("Spot X", var("Spot Index")), blk("sensing_of", fields={"PROPERTY": "x position"}, OBJECT="Rescue Runner"))), 70),
+            LT(MATH("abs", SUB(item_of("Spot Y", var("Spot Index")), ADD(blk("sensing_of", fields={"PROPERTY": "y position"}, OBJECT="Rescue Runner"), HOVER))), 50)),
+            [setv("Spot OK", 0)]),
+    ], warp=True, comment="A spot is OK if it is not the one we just used, is not under water, and is not right on top of the runner.")
+
+    supply.define("Pick Spot", [
+        setv("Tries", 0), setv("Spot OK", 0),
+        blk("control_repeat_until", CONDITION=OR(EQ(var("Spot OK"), 1), GT(var("Tries"), 15)), SUBSTACK=[
+            setv("Spot Index", blk("operator_random", FROM=1, TO=blk("data_lengthoflist", fields={"LIST": "Spot X"}))),
+            chg("Tries", 1),
+            call("Check Spot")]),
+        setv("Last Spot", var("Spot Index")),
+        setv("Base Y", item_of("Spot Y", var("Spot Index"))),
+        blk("motion_gotoxy", X=item_of("Spot X", var("Spot Index")), Y=var("Base Y")),
+    ], comment="Pick a random spot from the lists until we find a good one (give up after 15 tries).")
+
+    supply.define("Pop In", [
+        costume("supply 1"), blk("looks_setsizeto", SIZE=40),
+        blk("looks_seteffectto", fields={"EFFECT": "ghost"}, VALUE=80), blk("looks_show"),
+        blk("control_repeat", TIMES=5, SUBSTACK=[
+            blk("looks_changesizeby", CHANGE=12),
+            blk("looks_changeeffectby", fields={"EFFECT": "ghost"}, CHANGE=-16)]),
+    ])
+
+    supply.define("Float", [
+        chg("Bob", 15),
+        setv("Bob", MOD(var("Bob"), 360)),
+        blk("motion_sety", Y=ADD(var("Base Y"), MUL(4, MATH("sin", var("Bob"))))),
+        costume(JOIN("supply ", ADD(1, MATH("floor", DIV(var("Bob"), 90))))),
+    ], comment="The supply bobs up and down and glows (4 pictures) while it waits to be collected.")
+
+    supply.define("Collect Supply", [
+        chg("Score", 1),
+        broadcast("Supply Collected"),
+        costume("burst"),
+        blk("control_repeat", TIMES=6, SUBSTACK=[
+            blk("looks_changesizeby", CHANGE=10),
+            blk("looks_changeeffectby", fields={"EFFECT": "ghost"}, CHANGE=17)]),
+        blk("looks_hide"),
+        blk("looks_seteffectto", fields={"EFFECT": "ghost"}, VALUE=0),
+        blk("looks_setsizeto", SIZE=100),
+    ], comment="Score goes up by 1, everyone is told 'Supply Collected', and a starburst pops and fades.")
 
     # ---------------- Sprite 3: Rising Water ----------------
     water = P.sprite("Rising Water")
@@ -215,16 +294,29 @@ def build():
                      ("lose", "FLOODED!", "Press SPACE to try again")]:
         d, cx, cy = art.screen(t, s)
         ctl.add_costume(nm, d, "svg", cx, cy)
+    for n in range(SUPPLIES_TO_WIN + 1):
+        ctl.add_costume("Score %d" % n, art.hud(n), "svg", 240, 180)
     ctl.props.update(layerOrder=5, x=0, y=0)
+
     ctl.script(blk("event_whenflagclicked"), [
-        blk("data_setvariableto", fields={"VARIABLE": "Game State"}, VALUE="title"),
-        blk("data_setvariableto", fields={"VARIABLE": "Score"}, VALUE=0),
-        blk("looks_switchcostumeto", COSTUME="title"),
-        blk("motion_gotoxy", X=0, Y=0),
-        blk("looks_show"),
-        blk("control_wait_until", CONDITION=blk("sensing_keypressed", KEY_OPTION="space")),
-        blk("data_setvariableto", fields={"VARIABLE": "Game State"}, VALUE="playing"),
-        blk("looks_hide"),
-        blk("event_broadcast", BROADCAST_INPUT="Start Game"),
-    ])
+        setv("Game State", "title"), setv("Score", 0),
+        costume("title"), blk("motion_gotoxy", X=0, Y=0), blk("looks_show"),
+        blk("control_wait_until", CONDITION=keyp("space")),
+        call("Start New Game")],
+        comment="Green flag: show the title card and wait for SPACE.")
+
+    ctl.define("Start New Game", [
+        setv("Score", 0),
+        setv("Water Level", WATER_START),
+        setv("Vertical Speed", 0),
+        setv("Game State", "playing"),
+        broadcast("Start Game")],
+        comment="Reset everything FIRST (score, water, speed, state), then tell all the sprites to start.")
+
+    ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
+        costume("Score 0"), blk("motion_gotoxy", X=0, Y=0), blk("looks_show")],
+        comment="The scoreboard is a costume: 'Score 0' ... 'Score 10'.")
+
+    ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Supply Collected"}), [
+        costume(JOIN("Score ", var("Score")))])
     return P
