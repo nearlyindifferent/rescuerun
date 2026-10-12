@@ -240,7 +240,7 @@ test('L3 spawns: 60 respawns always use valid spots, never repeat, never appear 
     assert(isSpot(nx.x, nx.y), `valid spot ${nx.x},${nx.y}`);
     assert(!(Math.abs(nx.x - s.x) < 1 && Math.abs(nx.y - s.y) < 8), 'no immediate repeat');
     const r = await g.sprite('Rescue Runner');
-    assert(!(Math.abs(nx.x - r.x) < 70 && Math.abs(nx.y - (r.y + LAYOUT.HOVER)) < 50), `not on top of the runner (${nx.x},${nx.y}) vs (${r.x},${r.y})`);
+    assert(!(Math.abs(nx.x - r.x) < 70 && nx.y - r.y > LAYOUT.REACH_BELOW + 3 && nx.y - r.y < LAYOUT.REACH_ABOVE - 3), `not within reach of the runner (${nx.x},${nx.y}) vs (${r.x},${r.y})`);
   }
 });
 test('L3 supply positions are spread across the whole map over many spawns', async g => {
@@ -255,7 +255,7 @@ test('L4 title screen: water waits at the bottom and does not rise yet', async g
   const w = await g.sprite('Rising Water'); near(w.y, LAYOUT.WATER_START, 0.001, 'water y'); assert(w.visible, 'water visible');
   near(Number(await g.v('Water Level')), LAYOUT.WATER_START, 0.001, 'Water Level');
 });
-test('L4 water rises smoothly: constant 0.14 px per frame, sprite follows Water Level', async g => {
+test('L4 water rises smoothly: constant rate per frame (no jitter), sprite follows Water Level', async g => {
   await begin(g); await g.step(2);
   let prev = Number(await g.v('Water Level')); const deltas = [];
   for (let i = 0; i < 90; i++) {
@@ -276,16 +276,16 @@ test('L4 water gets darker as it rises (danger cue)', async g => {
   await g.setV('Water Level', 150); await g.step(3); const b2 = (await g.sprite('Rising Water')).brightness;
   assert(b0 > b1 && b1 > b2, `brightness ${b0} > ${b1} > ${b2}`); assert(b2 < -20 && b2 >= -25.5, 'near -25 at the top: ' + b2);
 });
-test('L4 flood timeline: ~80 s to reach the top, then exactly one Game Lost and the water stops', async g => {
+test('L4 flood timeline: ~125 s to reach the top, then exactly one Game Lost and the water stops', async g => {
   await begin(g);
   const startFrame = (await g.broadcasts()).filter(b => b.name === 'Start Game').pop().frame;
   let lostFrame = null;
-  for (let i = 0; i < 2600 && lostFrame === null; i += 10) {
+  for (let i = 0; i < 4400 && lostFrame === null; i += 10) {
     await g.step(10);
     const lost = (await g.broadcasts()).filter(b => b.name === 'Game Lost'); if (lost.length) lostFrame = lost[0].frame;
   }
   assert(lostFrame !== null, 'water never reached the top');
-  const secs = (lostFrame - startFrame) / 30; assert(secs > 70 && secs < 95, 'time to flood: ' + secs.toFixed(1) + ' s');
+  const secs = (lostFrame - startFrame) / 30; assert(secs > 118 && secs < 133, 'time to flood: ' + secs.toFixed(1) + ' s');
   await g.step(120);
   assert((await g.broadcasts()).filter(b => b.name === 'Game Lost').length === 1, 'Game Lost sent exactly once');
   const lvl = Number(await g.v('Water Level')); assert(lvl > LAYOUT.WATER_TOP && lvl < LAYOUT.WATER_TOP + 1, 'water stopped at the top: ' + lvl);
@@ -300,6 +300,165 @@ test('L4 supplies are never placed under water while drier spots exist', async g
 test('L4 water reaching the top sends Game Lost within a moment', async g => {
   await begin(g); await g.setV('Water Level', 171); await g.step(30);
   assert((await g.broadcasts()).some(b => b.name === 'Game Lost'), 'Game Lost sent');
+});
+
+// ------------------------------------------------------------------ Loop 5
+async function winGame(g) { for (let n = 1; n <= 10; n++) { await collectCurrent(g); await g.step(12); } }
+async function loseGame(g) { await g.setV('Water Level', LAYOUT.WATER_TOP - 0.5); await g.step(20); }
+const count = async (g, name) => (await g.broadcasts()).filter(b => b.name === name).length;
+async function restartWithSpace(g) { await g.step(40); await g.tap(' '); await g.step(6); }   // >1 s later, press SPACE
+
+test('L5 victory: 10th supply -> win screen, state won, runner cheers, everything stops', async g => {
+  await begin(g); await winGame(g); await g.step(30);
+  assert(await g.v('Game State') === 'won', 'state won: ' + await g.v('Game State'));
+  assert(Number(await g.v('Score')) === 10, 'score 10');
+  assert((await g.sprite('Game Controller')).costume === 'win', 'win screen');
+  assert((await g.sprite('Rescue Runner')).costume === 'cheer', 'runner cheers');
+  assert(!(await g.sprite('Emergency Supply')).visible, 'supply hidden');
+  assert(await count(g, 'Game Won') === 1 && await count(g, 'Game Lost') === 0, 'only Game Won broadcast');
+  const w0 = Number(await g.v('Water Level')); await g.step(60); near(Number(await g.v('Water Level')), w0, 1e-9, 'water stopped');
+  const x0 = (await g.sprite('Rescue Runner')).x; await g.hold('ArrowRight', 10); await g.step(2);
+  near((await g.sprite('Rescue Runner')).x, x0, 0.01, 'runner ignores keys');
+  await g.step(200); assert(Number(await g.v('Score')) === 10, 'score stays 10'); assert(await g.v('Game State') === 'won', 'still won');
+});
+test('L5 defeat: water at the top -> lose screen, state lost, runner worried, everything stops', async g => {
+  await begin(g); await collectCurrent(g); await g.step(14); await loseGame(g); await g.step(20);
+  assert(await g.v('Game State') === 'lost', 'state lost: ' + await g.v('Game State'));
+  assert((await g.sprite('Game Controller')).costume === 'lose', 'lose screen');
+  assert((await g.sprite('Rescue Runner')).costume === 'oops', 'runner worried');
+  assert(!(await g.sprite('Emergency Supply')).visible, 'supply hidden');
+  assert(await count(g, 'Game Lost') === 1 && await count(g, 'Game Won') === 0, 'only Game Lost broadcast');
+  const w0 = Number(await g.v('Water Level')); await g.step(60); near(Number(await g.v('Water Level')), w0, 1e-9, 'water stopped');
+  await g.step(300); assert(await g.v('Game State') === 'lost', 'still lost'); assert(Number(await g.v('Score')) === 1, 'score unchanged');
+});
+test('L5 defeat even if the runner is in mid-air: runner lands, never hangs in the sky', async g => {
+  await begin(g); await g.key(' ', true); await g.step(2); await g.key(' ', false); await g.step(3);
+  assert((await g.sprite('Rescue Runner')).y > GROUND + 20, 'is in the air');
+  await g.setV('Water Level', 175); await g.step(60);
+  near((await g.sprite('Rescue Runner')).y, GROUND, 0.001, 'landed');
+});
+test('L5 win celebration returns the runner exactly to where it stood (hops are symmetric)', async g => {
+  await begin(g); await walkTo(g, 170); await jump(g, null, 1);       // stand on the right balcony
+  await g.setV('Score', 9);
+  const s = await waitForSupply(g); const spot = SPOTS.find(([x, y]) => Math.abs(x - s.x) < 0.5 && Math.abs(y - s.y) < 5);
+  await teleport(g, s.x, spot[1] - LAYOUT.HOVER);
+  await g.step(150); assert(await g.v('Game State') === 'won', 'won');
+  const r = await g.sprite('Rescue Runner'); near(r.y, spot[1] - LAYOUT.HOVER, 0.001, 'back on the surface after hopping');
+});
+test('L5 win-vs-lose race: whichever comes first wins and the other is ignored (6 alignments)', async g => {
+  await begin(g); await g.setV('Score', 9); await g.step(1);
+  // supply is out and pops in; make the 10th pickup and the flood happen within a few frames of each other
+  const s = await waitForSupply(g);
+  await g.setV('Water Level', LAYOUT.WATER_TOP - LAYOUT.WATER_RATE * 3);
+  await teleport(g, s.x, s.y - LAYOUT.HOVER); await g.step(40);
+  const st = await g.v('Game State'); const c = (await g.sprite('Game Controller')).costume;
+  assert((st === 'won' && c === 'win') || (st === 'lost' && c === 'lose'), `consistent end state: ${st}/${c}`);
+  await g.step(100); assert(await g.v('Game State') === st, 'state never flips afterwards');
+});
+for (const offset of [0, 1, 2, 4, 6, 9]) {
+  test('L5 race alignment ' + offset + ': exactly one ending, always consistent', async g => {
+    await begin(g); await g.setV('Score', 9); const s = await waitForSupply(g);
+    await g.setV('Water Level', LAYOUT.WATER_TOP - LAYOUT.WATER_RATE * offset);
+    await teleport(g, s.x, s.y - LAYOUT.HOVER); await g.step(60);
+    const st = await g.v('Game State'); const c = (await g.sprite('Game Controller')).costume; const r = (await g.sprite('Rescue Runner')).costume;
+    assert((st === 'won' && c === 'win' && r === 'cheer') || (st === 'lost' && c === 'lose' && r === 'oops'), `ending ${st}/${c}/${r}`);
+  });
+}
+test('L5 restart after victory: SPACE after >1 s restarts everything cleanly', async g => {
+  await begin(g); await winGame(g); await g.step(40); await restartWithSpace(g); await g.step(30);
+  assert(await g.v('Game State') === 'playing', 'playing again'); assert(Number(await g.v('Score')) === 0, 'score reset');
+  assert(Number(await g.v('Water Level')) < -160, 'water reset: ' + await g.v('Water Level'));
+  assert((await g.sprite('Game Controller')).costume === 'Score 0', 'HUD reset');
+  const r = await g.sprite('Rescue Runner'); near(r.x, -10, 0.01, 'runner at start x'); near(r.y, GROUND, 0.01, 'runner on street'); assert(r.costume === 'idle', 'idle');
+  assert((await g.sprite('Emergency Supply')).visible, 'a supply is out again');
+  await g.hold('ArrowRight', 10); assert((await g.sprite('Rescue Runner')).x > 30, 'controls work after restart');
+});
+test('L5 restart after defeat: works the same way', async g => {
+  await begin(g); await loseGame(g); await restartWithSpace(g); await g.step(30);
+  assert(await g.v('Game State') === 'playing', 'playing again'); assert(Number(await g.v('Water Level')) < -160, 'water reset: ' + await g.v('Water Level'));
+  assert(Number(await g.v('Score')) === 0, 'score 0'); assert((await g.sprite('Rescue Runner')).costume !== 'oops', 'runner reset');
+});
+test('L5 restart is not triggered by a held SPACE or a tap in the first second', async g => {
+  await begin(g); for (let n = 1; n <= 9; n++) { await collectCurrent(g); await g.step(12); }
+  const s = await waitForSupply(g); await teleport(g, s.x, s.y - LAYOUT.HOVER);
+  await g.key(' ', true);                                           // player is still holding jump when the 10th supply lands
+  await g.step(150); assert(await g.v('Game State') === 'won', 'won');
+  assert(await g.v('Game State') === 'won', 'held SPACE does not restart (150 frames = 5 s)');
+  await g.key(' ', false); await g.step(3); await g.tap(' '); await g.step(6);
+  assert(await g.v('Game State') === 'playing', 'release + new press restarts');
+});
+test('L5 a quick tap during the first second of the end screen is ignored', async g => {
+  await begin(g); await winGame(g); await g.step(2);
+  await g.tap(' '); await g.step(8); assert(await g.v('Game State') === 'won', 'early tap ignored');
+});
+test('L5 three games in a row (win, lose, win): no leftover threads, water speed unchanged, score resets', async g => {
+  await begin(g); await winGame(g); await restartWithSpace(g); await g.step(10);
+  await loseGame(g); await restartWithSpace(g); await g.step(10);
+  let prev = Number(await g.v('Water Level')); await g.step(1); const d = Number(await g.v('Water Level')) - prev;
+  near(d, LAYOUT.WATER_RATE, 1e-6, 'single water loop after 2 restarts (not doubled)');
+  assert(Number(await g.v('Score')) === 0, 'score 0');
+  await winGame(g); await g.step(30); assert(await g.v('Game State') === 'won', 'third game can be won');
+  const th = await g.threads(); assert(th <= 4, 'few threads alive after the third game: ' + th);
+  assert(await count(g, 'Start Game') === 3, 'Start Game broadcast exactly once per game: ' + await count(g, 'Start Game'));
+});
+test('L5 green flag during a game: back to the title, then SPACE starts one clean game (no duplicate starts)', async g => {
+  await begin(g); await collectCurrent(g); await g.step(40); await g.setV('Water Level', 0);
+  await g.flag(); await g.step(6);
+  assert(await g.v('Game State') === 'title', 'title'); assert(Number(await g.v('Score')) === 0, 'score 0');
+  assert(Number(await g.v('Water Level')) === LAYOUT.WATER_START, 'water reset to start');
+  assert((await g.sprite('Game Controller')).costume === 'title', 'title card'); assert(!(await g.sprite('Emergency Supply')).visible, 'supply hidden');
+  const before = await count(g, 'Start Game'); await g.tap(' '); await g.step(20);
+  assert(await count(g, 'Start Game') === before + 1, 'exactly one new start');
+  const prev = Number(await g.v('Water Level')); await g.step(1); near(Number(await g.v('Water Level')) - prev, LAYOUT.WATER_RATE, 1e-6, 'single water loop');
+});
+test('L5 green flag on the win screen: waiting restart script is cancelled (SPACE then starts only one game)', async g => {
+  await begin(g); await winGame(g); await g.step(10); await g.flag(); await g.step(6);
+  assert(await g.v('Game State') === 'title', 'title'); const before = await count(g, 'Start Game');
+  await g.tap(' '); await g.step(20); assert(await count(g, 'Start Game') === before + 1, 'one start only');
+});
+
+// ------------------------------------------------------------------ Loop 5: a bot plays whole games
+const { makeBot } = require('./harness/bot');
+async function botGame(g) {
+  await begin(g); const startFrame = (await g.broadcasts()).filter(b => b.name === 'Start Game').pop().frame;
+  const bot = makeBot(g, LAYOUT);
+  const result = await bot.play(); const endFrame = await g.step(0);
+  return { result, seconds: (endFrame - startFrame) / 30, score: Number(await g.v('Score')) };
+}
+test('L5 BOT: a player who walks/jumps to every supply WINS the game with plenty of time to spare', async g => {
+  const r = await botGame(g);
+  console.log('        bot result:', JSON.stringify(r));
+  assert(r.result === 'won', 'bot should win, got ' + r.result + ' with score ' + r.score);
+  assert(r.score === 10, 'score 10'); assert(r.seconds < 45, 'bot needed ' + r.seconds.toFixed(1) + ' s (water takes ~125 s)');
+});
+test('L5 BOT-IDLE: a player who does nothing loses when the flood reaches the top', async g => {
+  await begin(g); await g.step(4200);
+  assert(await g.v('Game State') === 'lost', 'idle player loses: ' + await g.v('Game State'));
+  assert((await g.sprite('Game Controller')).costume === 'lose', 'lose screen');
+});
+
+// ------------------------------------------------------------------ Loop 5 (hardening found by the bot)
+async function setSpots(g, spots) {       // replace the supply's spot lists (to force a particular situation)
+  await g.eval(sp => { const t = vm.runtime.targets.find(t => t.getName() === 'Emergency Supply');
+    for (const id in t.variables) { const v = t.variables[id]; if (v.name === 'Spot X') v.value = sp.map(s => s[0]); if (v.name === 'Spot Y') v.value = sp.map(s => s[1]); } }, spots);
+}
+test('L5 standing on the street directly under a balcony supply never collects it (150 frames)', async g => {
+  await begin(g); await g.step(2);
+  const balcony = SPOTS.find(([x, y]) => y === -45 + LAYOUT.HOVER && x < 0);
+  await setSpots(g, [balcony, balcony]);
+  await g.setV('Score', 0);
+  // wait for a fresh spawn at the balcony spot (collect the current supply first)
+  await collectCurrent(g); await g.setV('Score', 0);
+  const s = await waitForSupply(g, 120); assert(Math.abs(s.x - balcony[0]) < 1, 'supply is on the balcony spot ' + s.x);
+  await teleport(g, balcony[0], GROUND); await g.step(150);
+  assert(Number(await g.v('Score')) === 0, 'not collected from below (score ' + await g.v('Score') + ')');
+  const r = await jump(g, null, 1);                                                      // a jump gets you up there
+  assert(Number(await g.v('Score')) === 1 || r.y === -45, 'jumping up reaches it');
+});
+test('L5 Pick Spot never hangs or breaks when only one spot exists', async g => {
+  await begin(g); await g.step(2); await setSpots(g, [SPOTS[0]]);
+  await collectCurrent(g); await g.step(20);
+  const s = await waitForSupply(g, 80); assert(isSpot(s.x, s.y), 'a supply still appears');
 });
 
 //__MORE_TESTS__

@@ -132,6 +132,7 @@ def build():
         comment="The runner waits on the street while the title screen is showing.")
 
     runner.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Start Game"}), [
+        stop("other scripts in sprite"),                      # end any leftover cheer/oops script from the last game
         blk("motion_setrotationstyle", fields={"STYLE": "left-right"}),
         blk("motion_gotoxy", X=RUNNER_START_X, Y=GROUND_Y),
         blk("motion_pointindirection", DIRECTION=90),
@@ -145,6 +146,19 @@ def build():
             call("Pick Costume"),
         ])],
         comment="MAIN LOOP: every frame the runner moves, falls/jumps, then shows the right picture. It stops when Game State is no longer 'playing'.")
+
+    runner.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Won"}), [
+        costume("cheer"), blk("looks_cleargraphiceffects"),
+        blk("control_repeat_until", CONDITION=EQ(var("On Ground"), 1), SUBSTACK=[call("Apply Gravity")]),
+        blk("control_repeat", TIMES=4, SUBSTACK=[
+            blk("control_repeat", TIMES=5, SUBSTACK=[blk("motion_changeyby", DY=5)]),
+            blk("control_repeat", TIMES=5, SUBSTACK=[blk("motion_changeyby", DY=-5)])])],
+        comment="VICTORY: the runner finishes landing, cheers, and hops for joy.")
+
+    runner.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Lost"}), [
+        costume("oops"),
+        blk("control_repeat_until", CONDITION=EQ(var("On Ground"), 1), SUBSTACK=[call("Apply Gravity")])],
+        comment="DEFEAT: the runner finishes landing and looks worried.")
 
     runner.define("Move Left Right", [
         setv("Speed", WALK_SPEED),
@@ -171,7 +185,7 @@ def build():
     runner.define("Find Floor", [setv("Floor Y", GROUND_Y)] + floor_checks, warp=True,
                   comment="Works out how high the floor is under the runner: the street, or the top of a balcony/roof if the runner is above it and not rising.")
 
-    runner.define("Jump And Gravity", [
+    runner.define("Apply Gravity", [
         call("Find Floor"),
         chg("Vertical Speed", -GRAVITY),
         IF(LT(var("Vertical Speed"), -MAX_FALL), [setv("Vertical Speed", -MAX_FALL)]),
@@ -181,9 +195,13 @@ def build():
             blk("motion_sety", Y=var("Floor Y")),
             setv("Vertical Speed", 0), setv("On Ground", 1)],
             [IF(GT(Y(), var("Floor Y")), [setv("On Ground", 0)])]),
+    ], comment="Gravity pulls the runner down every frame. The runner can never sink below the floor.")
+
+    runner.define("Jump And Gravity", [
+        call("Apply Gravity"),
         IF(AND(EQ(var("On Ground"), 1), OR(keyp("space"), keyp("up arrow"))), [
             setv("Vertical Speed", JUMP_SPEED), setv("On Ground", 0)]),
-    ], comment="Gravity pulls the runner down every frame. The runner can never sink below the floor. SPACE (or up arrow) gives an upward Vertical Speed.")
+    ], comment="Gravity, plus: SPACE (or up arrow) while standing on something gives an upward Vertical Speed.")
 
     runner.define("Pick Costume", [
         IFELSE(EQ(var("On Ground"), 0), [
@@ -241,20 +259,27 @@ def build():
         IF(LT(item_of("Spot Y", var("Spot Index")), ADD(var("Water Level"), 5)), [setv("Spot OK", 0)]),
         IF(AND(
             LT(MATH("abs", SUB(item_of("Spot X", var("Spot Index")), blk("sensing_of", fields={"PROPERTY": "x position"}, OBJECT="Rescue Runner"))), 70),
-            LT(MATH("abs", SUB(item_of("Spot Y", var("Spot Index")), ADD(blk("sensing_of", fields={"PROPERTY": "y position"}, OBJECT="Rescue Runner"), HOVER))), 50)),
+            GT(SUB(item_of("Spot Y", var("Spot Index")), blk("sensing_of", fields={"PROPERTY": "y position"}, OBJECT="Rescue Runner")), REACH_BELOW),
+            LT(SUB(item_of("Spot Y", var("Spot Index")), blk("sensing_of", fields={"PROPERTY": "y position"}, OBJECT="Rescue Runner")), REACH_ABOVE)),
             [setv("Spot OK", 0)]),
-    ], warp=True, comment="A spot is OK if it is not the one we just used, is not under water, and is not right on top of the runner.")
+        IF(AND(LT(var("Tries"), 12),
+               GT(MATH("abs", SUB(item_of("Spot Y", var("Spot Index")), ADD(blk("sensing_of", fields={"PROPERTY": "y position"}, OBJECT="Rescue Runner"), HOVER))), ONE_LEVEL)),
+           [setv("Spot OK", 0)]),
+    ], warp=True, comment="A spot is OK if it is not the one we just used, is not under water, and is not within reach of the runner's body (so a new supply can never be collected the instant it appears).")
 
     supply.define("Pick Spot", [
         setv("Tries", 0), setv("Spot OK", 0),
-        blk("control_repeat_until", CONDITION=OR(EQ(var("Spot OK"), 1), GT(var("Tries"), 15)), SUBSTACK=[
-            setv("Spot Index", blk("operator_random", FROM=1, TO=blk("data_lengthoflist", fields={"LIST": "Spot X"}))),
+        setv("Spot Index", blk("operator_random", FROM=1, TO=blk("data_lengthoflist", fields={"LIST": "Spot X"}))),
+        blk("control_repeat_until", CONDITION=OR(EQ(var("Spot OK"), 1), GT(var("Tries"), 24)), SUBSTACK=[
             chg("Tries", 1),
+            IFELSE(LT(var("Tries"), 12),
+                   [setv("Spot Index", blk("operator_random", FROM=1, TO=blk("data_lengthoflist", fields={"LIST": "Spot X"})))],
+                   [setv("Spot Index", ADD(MOD(var("Spot Index"), blk("data_lengthoflist", fields={"LIST": "Spot X"})), 1))]),
             call("Check Spot")]),
         setv("Last Spot", var("Spot Index")),
         setv("Base Y", item_of("Spot Y", var("Spot Index"))),
         blk("motion_gotoxy", X=item_of("Spot X", var("Spot Index")), Y=var("Base Y")),
-    ], comment="Pick a random spot from the lists until we find a good one (give up after 15 tries).")
+    ], comment="Try random spots first; if none is good, check every spot in order, so a good spot is always found if one exists.")
 
     supply.define("Pop In", [
         costume("supply 1"), blk("looks_setsizeto", SIZE=40),
@@ -267,7 +292,7 @@ def build():
     supply.define("Float", [
         chg("Bob", 15),
         setv("Bob", MOD(var("Bob"), 360)),
-        blk("motion_sety", Y=ADD(var("Base Y"), MUL(4, MATH("sin", var("Bob"))))),
+        blk("motion_sety", Y=ADD(var("Base Y"), MUL(BOB, MATH("sin", var("Bob"))))),
         costume(JOIN("supply ", ADD(1, MATH("floor", DIV(var("Bob"), 90))))),
     ], comment="The supply bobs up and down and glows (4 pictures) while it waits to be collected.")
 
@@ -342,5 +367,28 @@ def build():
         comment="The scoreboard is a costume: 'Score 0' ... 'Score 10'.")
 
     ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Supply Collected"}), [
-        costume(JOIN("Score ", var("Score")))])
+        costume(JOIN("Score ", var("Score"))),
+        IF(AND(EQ(var("Score"), SUPPLIES_TO_WIN), EQ(var("Game State"), "playing")), [broadcast("Game Won")])],
+        comment="Update the scoreboard. The 10th supply wins the game.")
+
+    ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Won"}), [
+        IF(EQ(var("Game State"), "playing"), [
+            setv("Game State", "won"),
+            costume("win"),
+            call("Wait For Restart")])],
+        comment="VICTORY screen. It only happens if the game was still 'playing', so a win and a loss can never both happen.")
+
+    ctl.script(blk("event_whenbroadcastreceived", fields={"BROADCAST_OPTION": "Game Lost"}), [
+        IF(EQ(var("Game State"), "playing"), [
+            setv("Game State", "lost"),
+            costume("lose"),
+            call("Wait For Restart")])],
+        comment="DEFEAT screen: the flood reached the top.")
+
+    ctl.define("Wait For Restart", [
+        blk("control_wait", DURATION=1),
+        blk("control_wait_until", CONDITION=NOT(keyp("space"))),
+        blk("control_wait_until", CONDITION=keyp("space")),
+        call("Start New Game")],
+        comment="Wait 1 second, wait for SPACE to be let go (so a held jump key can't restart), then wait for a new SPACE press.")
     return P

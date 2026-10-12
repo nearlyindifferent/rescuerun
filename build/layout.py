@@ -9,7 +9,7 @@ STAGE_W, STAGE_H = 480, 360
 GROUND_Y = -115          # y position of the player's feet on the street
 WATER_START = -168       # Water Level when a game starts (just above the screen bottom)
 WATER_TOP = 172          # if the water surface reaches this, the player loses
-WATER_RATE = 0.14        # Water Level gained per frame (30 frames per second)
+WATER_RATE = 0.09        # Water Level gained per frame (30 frames per second): ~125 s from bottom to top
 
 JUMP_SPEED = 14          # Vertical Speed given by a jump (reaches ~91 px)
 GRAVITY = 1
@@ -29,9 +29,18 @@ PLATFORMS = [
     ("Upper right",      98,  192,  95),
 ]
 
-# Supply spots: (x, y of the package centre).  A package floats 24 px above
-# the surface it belongs to, so the runner can grab it while standing there.
-HOVER = 24
+# Supply geometry.  The runner is 78 px tall; a supply's glow reaches GLOW px from
+# its centre and bobs +-BOB px.  With HOVER = 40 a platform supply is easy to grab
+# while standing on that platform, but a runner standing on the level below (70 px
+# lower, helmet at +8) cannot touch it: 40 - 22 - 3 = 15 px above the platform.
+RUNNER_HEIGHT = 78
+GLOW = 22
+BOB = 3
+# a spot is "within reach of the runner's body" when (spot y - runner feet y) is in:
+REACH_BELOW = -(GLOW + BOB)                 # supply is below the runner's feet by more than this -> safe
+REACH_ABOVE = RUNNER_HEIGHT + GLOW + BOB    # supply is above the runner's helmet by more than this -> safe
+
+HOVER = 40
 SPOTS = [
     (-170, GROUND_Y + HOVER),
     (-60,  GROUND_Y + HOVER),
@@ -47,3 +56,5 @@ SPOTS = [
 FEET_REACH = 8           # how far the feet may overhang a platform edge and still stand on it
 SCREEN_EDGE = 225        # the runner cannot walk past this x
 RUNNER_START_X = -10      # open street (nothing low overhead), centre of the screen
+
+ONE_LEVEL = 170          # the next supply is at most this far (up/down) from the runner: about two balcony levels (70 px each)

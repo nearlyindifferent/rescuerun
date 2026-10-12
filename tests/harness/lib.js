@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
-async function openGame(sb3Path) {
+async function openGame(sb3Path, seed = Number(process.env.SEED || 1)) {
   const browser = await chromium.launch({
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
   });
@@ -12,6 +12,7 @@ async function openGame(sb3Path) {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('file://' + path.join(__dirname, 'page.html'));
+  await page.evaluate(s => H.seed(s), seed);
   const b64 = fs.readFileSync(sb3Path).toString('base64');
   const names = await page.evaluate(b => H.load(b), b64);
   const g = {

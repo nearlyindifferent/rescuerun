@@ -16,6 +16,15 @@
   window.__advance = ms => { vt += ms; };
 })();
 
+// seeded random numbers (Scratch's "pick random" uses Math.random) -> every run is reproducible
+let rngState = 1;
+Math.random = () => {                          // mulberry32: a proper small PRNG
+  rngState = (rngState + 0x6D2B79F5) | 0;
+  let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+
 const FRAME_MS = 1000 / 30;
 const soundLog = [];
 const broadcastLog = [];       // {frame, name} every time a broadcast is sent            // {t, sprite, sound}
@@ -54,6 +63,7 @@ function fakeAudioEngine() {
 
 window.H = {
   soundLog, broadcastLog,
+  seed(n) { rngState = n >>> 0; },
   async load(b64) {
     const bin = atob(b64); const buf = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
@@ -73,6 +83,9 @@ window.H = {
       if (op === 'event_whenbroadcastreceived' && fields) broadcastLog.push({ frame, name: fields.BROADCAST_OPTION });
       return origStart(op, fields, target);
     };
+    const realDraw = renderer.draw.bind(renderer);
+    renderer.draw = () => {};                      // pixels are only needed for screenshots; touching uses CPU silhouettes
+    window.__realDraw = realDraw;
     window.vm = vm;
     return vm.runtime.targets.map(t => t.getName());
   },
@@ -84,6 +97,11 @@ window.H = {
       for (const s of pendingSounds.slice()) if (s.end <= Date.now()) { pendingSounds.splice(pendingSounds.indexOf(s), 1); s.res(); }
       await Promise.resolve(); await Promise.resolve();
       vm.runtime._step();
+      if (window.__trace) {
+        const tg = n => vm.runtime.targets.find(t => t.getName() === n);
+        const s = tg('Emergency Supply'), r = tg('Rescue Runner');
+        window.__trace.push([frame, Number(H.variable('Score')), s.visible ? 1 : 0, +s.x.toFixed(0), +s.y.toFixed(0), +r.x.toFixed(0), +r.y.toFixed(0)]);
+      }
     }
     return frame;
   },
@@ -113,7 +131,7 @@ window.H = {
   },
   threads() { return vm.runtime.threads.length; },
   snapshot() {
-    return new Promise(res => { renderer.requestSnapshot(res); renderer.draw(); });
+    return new Promise(res => { renderer.requestSnapshot(res); window.__realDraw(); });
   },
 };
 </script></body></html>
