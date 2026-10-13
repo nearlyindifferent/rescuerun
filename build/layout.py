@@ -7,9 +7,9 @@ platforms you SEE are exactly the platforms the code lets you stand on.
 STAGE_W, STAGE_H = 480, 360
 
 GROUND_Y = -115          # y position of the player's feet on the street
-WATER_START = -168       # Water Level when a game starts (just above the screen bottom)
+WATER_START = -145       # Water Level when a game starts: already visible on the street edge
 WATER_TOP = 172          # if the water surface reaches this, the player loses
-WATER_RATE = 0.09        # Water Level gained per frame (30 frames per second): ~125 s from bottom to top
+WATER_RATE = 0.13        # Water Level gained per frame (30 frames/s): ~83 s from start to top
 
 JUMP_SPEED = 14          # Vertical Speed given by a jump (reaches ~91 px)
 GRAVITY = 1

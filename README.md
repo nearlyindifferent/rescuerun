@@ -21,7 +21,7 @@ Every script is made of normal Scratch blocks that you can open, read and change
 
 * Run and jump to each **red emergency supply crate** (it glows and floats).
 * Each crate adds **1** to your score. The scoreboard at the top shows `0/10` … `10/10`.
-* The flood **rises slowly** (about 2 minutes from bottom to top) and the water gets darker the higher it climbs.
+* The flood **rises slowly** (under 1½ minutes from bottom to top) and the water gets darker the higher it climbs.
   Wading through water slows you down, and an alarm sounds when it gets high.
 * **Get 10 supplies → YOU DID IT!** — **Water reaches the top → FLOODED!**
 * Press **SPACE** on the end screen to play again. (The green flag also resets everything.)
@@ -54,7 +54,7 @@ Broadcast messages: **Start Game**, **Supply Collected**, **Game Won**, **Game L
 * **Custom blocks** (look in *My Blocks*): `Move Left Right`, `Find Floor`, `Apply Gravity`, `Jump And Gravity`, `Pick Costume`, `Pick Spot`, `Check Spot`, `Collect Supply`, `Start New Game`, `Wait For Restart` … they make the long scripts read like sentences.
 * **Gravity:** `change Vertical Speed by -1` then `change y by Vertical Speed`; if `y position < Floor Y` → `set y to Floor Y` and `set Vertical Speed to 0` (the runner can never fall through the ground).
 * **Collecting:** `if <touching Rescue Runner?>` → `change Score by 1` → `broadcast Supply Collected`.
-* **The flood:** `change Water Level by 0.09` and `go to x: 0 y: Water Level` every frame.
+* **The flood:** `change Water Level by 0.13` and `go to x: 0 y: Water Level` every frame.
 * **Winning / losing:** `if Score = 10 → broadcast Game Won`; `if Water Level > 172 → broadcast Game Lost`.
 * **Random supplies:** `pick random 1 to (length of Spot X)` picks a place from a list.
 * **Sensing & operators:** `key pressed?`, `touching?`, `join`, `mod`, `floor`, `sin`, `and/or/not`.

@@ -276,16 +276,16 @@ test('L4 water gets darker as it rises (danger cue)', async g => {
   await g.setV('Water Level', 150); await g.step(3); const b2 = (await g.sprite('Rising Water')).brightness;
   assert(b0 > b1 && b1 > b2, `brightness ${b0} > ${b1} > ${b2}`); assert(b2 < -20 && b2 >= -25.5, 'near -25 at the top: ' + b2);
 });
-test('L4 flood timeline: ~125 s to reach the top, then exactly one Game Lost and the water stops', async g => {
+test('L4 flood timeline: ~83 s to reach the top, then exactly one Game Lost and the water stops', async g => {
   await begin(g);
   const startFrame = (await g.broadcasts()).filter(b => b.name === 'Start Game').pop().frame;
   let lostFrame = null;
-  for (let i = 0; i < 4400 && lostFrame === null; i += 10) {
+  for (let i = 0; i < 3200 && lostFrame === null; i += 10) {
     await g.step(10);
     const lost = (await g.broadcasts()).filter(b => b.name === 'Game Lost'); if (lost.length) lostFrame = lost[0].frame;
   }
   assert(lostFrame !== null, 'water never reached the top');
-  const secs = (lostFrame - startFrame) / 30; assert(secs > 118 && secs < 133, 'time to flood: ' + secs.toFixed(1) + ' s');
+  const secs = (lostFrame - startFrame) / 30; assert(secs > 77 && secs < 89, 'time to flood: ' + secs.toFixed(1) + ' s');
   await g.step(120);
   assert((await g.broadcasts()).filter(b => b.name === 'Game Lost').length === 1, 'Game Lost sent exactly once');
   const lvl = Number(await g.v('Water Level')); assert(lvl > LAYOUT.WATER_TOP && lvl < LAYOUT.WATER_TOP + 1, 'water stopped at the top: ' + lvl);
@@ -367,7 +367,7 @@ for (const offset of [0, 1, 2, 4, 6, 9]) {
 test('L5 restart after victory: SPACE after >1 s restarts everything cleanly', async g => {
   await begin(g); await winGame(g); await g.step(40); await restartWithSpace(g); await g.step(30);
   assert(await g.v('Game State') === 'playing', 'playing again'); assert(Number(await g.v('Score')) === 0, 'score reset');
-  assert(Number(await g.v('Water Level')) < -160, 'water reset: ' + await g.v('Water Level'));
+  assert(Number(await g.v('Water Level')) < LAYOUT.WATER_START + 10, 'water reset: ' + await g.v('Water Level'));
   assert((await g.sprite('Game Controller')).costume === 'Score 0', 'HUD reset');
   const r = await g.sprite('Rescue Runner'); near(r.x, -10, 0.01, 'runner at start x'); near(r.y, GROUND, 0.01, 'runner on street'); assert(r.costume === 'idle', 'idle');
   assert((await g.sprite('Emergency Supply')).visible, 'a supply is out again');
@@ -375,7 +375,7 @@ test('L5 restart after victory: SPACE after >1 s restarts everything cleanly', a
 });
 test('L5 restart after defeat: works the same way', async g => {
   await begin(g); await loseGame(g); await restartWithSpace(g); await g.step(30);
-  assert(await g.v('Game State') === 'playing', 'playing again'); assert(Number(await g.v('Water Level')) < -160, 'water reset: ' + await g.v('Water Level'));
+  assert(await g.v('Game State') === 'playing', 'playing again'); assert(Number(await g.v('Water Level')) < LAYOUT.WATER_START + 10, 'water reset: ' + await g.v('Water Level'));
   assert(Number(await g.v('Score')) === 0, 'score 0'); assert((await g.sprite('Rescue Runner')).costume !== 'oops', 'runner reset');
 });
 test('L5 restart is not triggered by a held SPACE or a tap in the first second', async g => {
@@ -429,10 +429,10 @@ test('L5 BOT: a player who walks/jumps to every supply WINS the game with plenty
   const r = await botGame(g);
   console.log('        bot result:', JSON.stringify(r));
   assert(r.result === 'won', 'bot should win, got ' + r.result + ' with score ' + r.score);
-  assert(r.score === 10, 'score 10'); assert(r.seconds < 45, 'bot needed ' + r.seconds.toFixed(1) + ' s (water takes ~125 s)');
+  assert(r.score === 10, 'score 10'); assert(r.seconds < 40, 'bot needed ' + r.seconds.toFixed(1) + ' s (water takes ~83 s)');
 });
 test('L5 BOT-IDLE: a player who does nothing loses when the flood reaches the top', async g => {
-  await begin(g); await g.step(4200);
+  await begin(g); await g.step(3200);
   assert(await g.v('Game State') === 'lost', 'idle player loses: ' + await g.v('Game State'));
   assert((await g.sprite('Game Controller')).costume === 'lose', 'lose screen');
 });
